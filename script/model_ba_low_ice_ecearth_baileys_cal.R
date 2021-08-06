@@ -1,0 +1,186 @@
+rm(list = ls())
+graphics.off()
+gc()
+
+
+library(R.matlab)
+
+# years = 1950:2018
+
+## fix parameters
+dir_sim='/Users/marco/Documents/dati/ivana_ice_fires/Sixto_ECEarth3/'
+dir_oss = '/Users/marco/Dropbox/estcena/scripts/ivana_ice_fires/review/data/'
+dir_out = '/Users/marco/Documents/output/ivana_ice_fires/'
+source('/Users/marco/Dropbox/estcena/scripts/ivana_ice_fires/review/script/scale_1981_2000.R')
+
+years = 1950:2020
+years_model = 1951:2020
+iok_model=match(years_model,years)
+
+model_name = 'baileys_cal_tasmax'
+domain = 'baileys'
+
+
+## load data
+dum = readMat(paste0(
+  dir_oss,
+  paste0('fire_1950_2020_', domain, '_mjjas_gt300.mat')
+))
+BAS = as.numeric(dum$FIRE)
+
+BAS=BAS[iok_model]/1000
+
+load(paste0(dir_oss, paste0("nclimgrid_", domain, "_cal.RData")))
+#delete months of the years 1948 and 1949 (used to have complete SPI24 series)
+nclimgrid = nclimgrid[,-(1:24)]
+
+# delete years until 1981
+nclimgrid = nclimgrid[,-(1:((iok_model[1]-1)*12))]
+
+
+TX = rep(NA, length(years_model))
+for (iyear in 1:length(years_model)) {
+  i1 = (iyear - 1) * 12 + 4
+  i2 = (iyear - 1) * 12 + 9
+  TX[iyear] = mean(nclimgrid[10, i1:i2], na.rm = TRUE)
+}
+SPI = nclimgrid[4, seq(3, dim(nclimgrid)[2], 12)]
+
+
+
+
+## the regression model
+mydata = data.frame(
+  "y" = log(BAS),
+  "x1" = scale_1981_2000(SPI,years_model),
+  "x2" = scale_1981_2000(TX,years_model),
+  "x3" = scale_1981_2000(years_model,years_model)
+)
+fit <- lm(y ~ x1 + x2 + x3 , data = mydata)
+
+# fit <- lm(y ~ x1  + x3 , data = mydata)
+# confint.default(fit)
+pred = fit$coefficients[1] + fit$coefficients[2] *
+  mydata$x1 + fit$coefficients[3] *
+  mydata$x2 + fit$coefficients[4] *
+  mydata$x3
+
+
+plot.ts(log(BAS))
+lines((pred), col = "red")
+
+print(cor.test(log(BAS),pred))
+
+
+summary(fit)
+
+
+
+
+
+
+
+  
+#load ctrl simulations
+setwd(dir_sim)
+
+
+#files = list.files(pattern = "^SPI6_low00(.*)RData$")
+files_tasmax = list.files(pattern = "*tasmax_allmon_y1030.mat")
+files_spi = list.files(pattern = "*pr_allmon_y1030_spi4.RData")
+changes=vector()
+changes_tasmax=vector()
+changes_spi=vector()
+
+# for (ifile in 4:4) {
+for (ifile in 1:(length(files_spi))) {
+  #namefile = files[ifile]
+  
+  nomefile=as.character(files_tasmax[ifile])
+  dum_tasmax_ctrl=readMat(nomefile)
+  dum_tasmax_fut=readMat(paste0(dir_sim,'low_ice/',nomefile))
+  dum_tasmax=c(dum_tasmax_ctrl$tasmax.eco, dum_tasmax_fut$tasmax.eco)
+  
+  load(files_spi[ifile])
+  aux=vector()
+  aux=spi4[seq(3,length(spi4),12)]
+  # aux[22]=NA
+  
+  aux_tx=vector()
+  for (iyear in 1:40) {
+    i1 = (iyear - 1) * 12 + 4
+    i2 = (iyear - 1) * 12 + 9
+    aux_tx[iyear] = mean(dum_tasmax[i1:i2], na.rm = TRUE)
+  }
+  
+  
+  spi4_3=(aux)
+  tx_4_9=(aux_tx)
+  plot.ts(spi4_3)
+  plot.ts(tx_4_9)
+  
+  writeMat(file.path(dir_sim, paste0('spi4_3_',ifile-1,'_nostd_',domain,'.mat')), spi4_3=spi4_3)
+  writeMat(file.path(dir_sim, paste0('tx_4_9_',ifile-1,'_nostd_',domain,'.mat')), tx_4_9=tx_4_9)
+  writeMat(file.path(dir_oss, paste0('low_ice_ecearth/spi4_3_',ifile-1,'_nostd_',domain,'.mat')), spi4_3=spi4_3)
+  writeMat(file.path(dir_oss, paste0('low_ice_ecearth/tx_4_9_',ifile-1,'_nostd_',domain,'.mat')), tx_4_9=tx_4_9)
+  
+  
+  # spi4_3=scale(aux)
+  # tx_4_10=scale(aux_tx)
+ 
+  #writeMat(file.path(dir_sim, paste0('spi4_3_',ifile-1,'_',domain,'.mat')), spi4_3=spi4_3)
+  #writeMat(file.path(dir_sim, paste0('tx_4_10_',ifile-1,'_',domain,'.mat')), tx_4_10=tx_4_10)
+  
+  
+  
+  # pred = fit$coefficients[1] + fit$coefficients[2] * scale(aux)
+  # pred = fit$coefficients[1] + fit$coefficients[2] *
+  #   scale(aux) + fit$coefficients[3] *
+  #   scale(aux_tx) 
+
+  pred = fit$coefficients[1] + fit$coefficients[2] *
+    scale_1981_2000(aux,1981:2020) + fit$coefficients[3] *
+    scale_1981_2000(aux_tx,1981:2020) 
+  
+  changes_spi[ifile]=mean((aux[21:40]),na.rm=TRUE)-mean((aux[1:20]),na.rm=TRUE)
+  changes_tasmax[ifile]=mean((aux_tx[21:40]),na.rm=TRUE)-mean((aux_tx[1:20]),na.rm=TRUE)
+
+  print(ifile)
+  plot.ts(scale_1981_2000(aux,1981:2020))
+  plot.ts(scale_1981_2000(aux_tx,1981:2020))
+  
+  
+  ctrl_ens=mean(exp(pred[1:20]),na.rm=TRUE)
+  ice_ens=mean(exp(pred[21:40]),na.rm=TRUE)
+  
+  #mean_change.ba1(:,ieco)=nanmean(change_ba1(:,ieco),1);
+  #change_ba1(ircm,:)=100*(nanmean(exp(BA_FUT1),1)-nanmean(exp(BA_PAST),1))./nanmean(exp(BA_PAST),1);
+  changes[ifile]=100*(ice_ens-ctrl_ens)/ctrl_ens
+  
+  
+  
+  
+  
+}
+
+quantile(changes_tasmax,c(0.1,0.5,0.9))
+boxplot(changes_tasmax)
+  
+quantile(changes_spi,c(0.1,0.5,0.9))
+boxplot(changes_spi)
+
+quantile(changes,c(0.1,0.5,0.9))
+boxplot(changes)
+
+
+cc
+
+png(file = paste0(dir_out,"change_tsmax_ecearth.jpeg"), width = 500, height = 1000)
+par(mar=c(10,6,4,1)+.1)
+barplot(changes_tasmax,names.arg=substring(files_tasmax,1,17),ylab="Degree", col= "black", las=2, border = 0, cex.lab=1, cex.axis=1, font=1,col.axis="black")
+dev.off()
+
+png(file = paste0(dir_out,"change_spi_ecearth.jpeg"), width = 500, height = 1000)
+par(mar=c(10,6,4,1)+.1)
+barplot(changes_spi,names.arg=substring(files_tasmax,1,17),ylab="Degree", col= "black", las=2, border = 0, cex.lab=1, cex.axis=1, font=1,col.axis="black")
+dev.off()
